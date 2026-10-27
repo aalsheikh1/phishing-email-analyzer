@@ -1,0 +1,32 @@
+From: IT Support <support@yourcompany.com>
+Reply-To: support@secure-verify.ru
+To: employee@yourcompany.com
+Subject: URGENT: Verify your account immediately
+Date: Mon, 26 Oct 2026 09:14:00 +0000
+Message-ID: <a1b2c3d4@secure-verify.ru>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="BOUNDARY-OUTER"
+
+--BOUNDARY-OUTER
+Content-Type: text/html; charset="utf-8"
+
+<html>
+  <body>
+    <p>Dear Employee,</p>
+    <p>We detected unusual activity on your account. Action required:
+    your account will be <b>suspended</b> unless you verify your
+    login immediately.</p>
+    <p><a href="http://login-verify.ru/steal">https://yourcompany.com/login</a></p>
+    <p>Please review the attached invoice as well.</p>
+    <p>IT Support Team</p>
+  </body>
+</html>
+
+--BOUNDARY-OUTER
+Content-Type: application/vnd.ms-excel.sheet.macroEnabled.12; name="Invoice_March.xlsm"
+Content-Disposition: attachment; filename="Invoice_March.xlsm"
+Content-Transfer-Encoding: base64
+
+VGhpcyBpcyBhIGhhcm1sZXNzIHBsYWNlaG9sZGVyIGZpbGUgZm9yIHRlc3RpbmcuCg==
+
+--BOUNDARY-OUTER--
