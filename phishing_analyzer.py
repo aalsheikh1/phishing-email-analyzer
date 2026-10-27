@@ -1,9 +1,39 @@
 """Phishing Email Analyzer - inspects a .eml file for common phishing indicators."""
 
+import re
 import sys
 from email import policy
 from email.parser import BytesParser
 from email.utils import parseaddr
+from html.parser import HTMLParser
+from urllib.parse import urlparse
+
+# Visible link text that looks like an address, e.g. "https://site.com/x" or "site.com"
+URL_LIKE = re.compile(r"^(https?://)?[\w.-]+\.[a-z]{2,}(/\S*)?$", re.IGNORECASE)
+
+
+class LinkExtractor(HTMLParser):
+    """Collect (href, visible text) pairs from <a> tags in HTML."""
+
+    def __init__(self):
+        super().__init__()
+        self.links = []
+        self._href = None
+        self._text = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "a":
+            self._href = dict(attrs).get("href")
+            self._text = []
+
+    def handle_data(self, data):
+        if self._href is not None:
+            self._text.append(data)
+
+    def handle_endtag(self, tag):
+        if tag == "a" and self._href is not None:
+            self.links.append((self._href, "".join(self._text).strip()))
+            self._href = None
 
 
 def load_email(path):
@@ -37,6 +67,33 @@ def check_reply_to(msg):
     return 0, "[ok] From and Reply-To domains agree"
 
 
+def get_host(url):
+    """Return the lowercase host of a URL (without 'www.'), adding a scheme if missing."""
+    if "://" not in url:
+        url = "http://" + url
+    host = (urlparse(url).hostname or "").lower()
+    return host.removeprefix("www.")
+
+
+def check_links(msg):
+    """Flag links whose visible text shows one address but point to another.
+
+    Returns (points, finding) where points is 1 if suspicious, else 0.
+    """
+    body = msg.get_body(preferencelist=("html",))
+    if body is None:
+        return 0, "[ok] No HTML links to inspect"
+
+    extractor = LinkExtractor()
+    extractor.feed(body.get_content())
+
+    for href, text in extractor.links:
+        if URL_LIKE.match(text) and get_host(text) != get_host(href):
+            return 1, (f"[!] Link shows '{text}' but goes to '{href}' "
+                       f"- the visible link lies (+1)")
+    return 0, "[ok] No deceptive display-text links"
+
+
 def print_summary(path, msg):
     """Print the key headers of the email."""
     attachments = get_attachments(msg)
@@ -61,9 +118,10 @@ def main():
 
     print_summary(path, msg)
 
-    _, finding = check_reply_to(msg)
     print("\nFINDINGS:")
-    print(f"  {finding}")
+    for check in (check_reply_to, check_links):
+        _, finding = check(msg)
+        print(f"  {finding}")
 
 
 if __name__ == "__main__":
