@@ -11,6 +11,12 @@ from urllib.parse import urlparse
 # Visible link text that looks like an address, e.g. "https://site.com/x" or "site.com"
 URL_LIKE = re.compile(r"^(https?://)?[\w.-]+\.[a-z]{2,}(/\S*)?$", re.IGNORECASE)
 
+# Pressure words phishers use to make victims act before thinking
+URGENCY_KEYWORDS = [
+    "urgent", "verify", "suspend", "immediately", "action required",
+    "account locked", "unusual activity", "final notice", "expire",
+]
+
 
 class LinkExtractor(HTMLParser):
     """Collect (href, visible text) pairs from <a> tags in HTML."""
@@ -94,6 +100,31 @@ def check_links(msg):
     return 0, "[ok] No deceptive display-text links"
 
 
+def get_body_text(msg):
+    """Return the email body as plain text (HTML tags stripped)."""
+    body = msg.get_body(preferencelist=("plain", "html"))
+    if body is None:
+        return ""
+    text = body.get_content()
+    if body.get_content_subtype() == "html":
+        text = re.sub(r"<[^>]+>", " ", text)
+    return text
+
+
+def check_urgency(msg):
+    """Flag pressure words in the subject or body.
+
+    Returns (points, finding) where points is 1 if suspicious, else 0.
+    """
+    text = f"{msg['Subject'] or ''} {get_body_text(msg)}".lower()
+    found = [kw for kw in URGENCY_KEYWORDS if re.search(rf"\b{re.escape(kw)}", text)]
+
+    if found:
+        return 1, (f"[!] Urgency keywords: {', '.join(found)} "
+                   f"- pressure is a phishing tell (+1)")
+    return 0, "[ok] No urgency keywords"
+
+
 def print_summary(path, msg):
     """Print the key headers of the email."""
     attachments = get_attachments(msg)
@@ -119,7 +150,7 @@ def main():
     print_summary(path, msg)
 
     print("\nFINDINGS:")
-    for check in (check_reply_to, check_links):
+    for check in (check_reply_to, check_links, check_urgency):
         _, finding = check(msg)
         print(f"  {finding}")
 
