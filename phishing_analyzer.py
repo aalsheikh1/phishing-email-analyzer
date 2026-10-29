@@ -146,6 +146,15 @@ def check_attachments(msg):
     return 0, "[ok] No dangerous attachment types"
 
 
+def get_verdict(score):
+    """Turn a suspicion score into a verdict line."""
+    if score >= 2:
+        return "HIGH - Likely phishing. Do not click, do not reply."
+    if score == 1:
+        return "MEDIUM - Suspicious. Verify the sender through another channel."
+    return "LOW - Looks benign. No action needed."
+
+
 def print_summary(path, msg):
     """Print the key headers of the email."""
     attachments = get_attachments(msg)
@@ -170,10 +179,15 @@ def main():
 
     print_summary(path, msg)
 
+    score = 0
     print("\nFINDINGS:")
     for check in (check_reply_to, check_links, check_urgency, check_attachments):
-        _, finding = check(msg)
+        points, finding = check(msg)
+        score += points
         print(f"  {finding}")
+
+    print(f"\nSuspicion score: {score}")
+    print(f"Verdict: {get_verdict(score)}")
 
 
 if __name__ == "__main__":
