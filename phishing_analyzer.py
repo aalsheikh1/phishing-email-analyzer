@@ -1,5 +1,6 @@
 """Phishing Email Analyzer - inspects a .eml file for common phishing indicators."""
 
+import os
 import re
 import sys
 from email import policy
@@ -10,6 +11,11 @@ from urllib.parse import urlparse
 
 # Visible link text that looks like an address, e.g. "https://site.com/x" or "site.com"
 URL_LIKE = re.compile(r"^(https?://)?[\w.-]+\.[a-z]{2,}(/\S*)?$", re.IGNORECASE)
+
+# ANSI terminal colors; turned off when output is piped to a file or NO_COLOR is set
+USE_COLOR = sys.stdout.isatty() and "NO_COLOR" not in os.environ
+RED, GREEN, YELLOW, BLUE, BOLD = "\033[31m", "\033[32m", "\033[33m", "\033[34m", "\033[1m"
+RESET = "\033[0m"
 
 # Pressure words phishers use to make victims act before thinking
 URGENCY_KEYWORDS = [
@@ -146,19 +152,26 @@ def check_attachments(msg):
     return 0, "[ok] No dangerous attachment types"
 
 
+def color(text, *codes):
+    """Wrap text in ANSI color codes when color output is enabled."""
+    if not USE_COLOR:
+        return text
+    return "".join(codes) + text + RESET
+
+
 def get_verdict(score):
-    """Turn a suspicion score into a verdict line."""
+    """Turn a suspicion score into a colored verdict line."""
     if score >= 2:
-        return "HIGH - Likely phishing. Do not click, do not reply."
+        return color("HIGH - Likely phishing. Do not click, do not reply.", BOLD, RED)
     if score == 1:
-        return "MEDIUM - Suspicious. Verify the sender through another channel."
-    return "LOW - Looks benign. No action needed."
+        return color("MEDIUM - Suspicious. Verify the sender through another channel.", BOLD, YELLOW)
+    return color("LOW - Looks benign. No action needed.", BOLD, GREEN)
 
 
 def print_summary(path, msg):
     """Print the key headers of the email."""
     attachments = get_attachments(msg)
-    print(f"PHISHING ANALYSIS: {path}")
+    print(color(f"PHISHING ANALYSIS: {path}", BOLD, BLUE))
     print(f"From:        {msg['From']}")
     print(f"Reply-To:    {msg['Reply-To'] or '(none)'}")
     print(f"Subject:     {msg['Subject']}")
@@ -177,16 +190,19 @@ def main():
         print(f"Error: file not found: {path}")
         sys.exit(1)
 
+    if USE_COLOR and os.name == "nt":
+        os.system("")  # enables ANSI color support in older Windows consoles
+
     print_summary(path, msg)
 
     score = 0
-    print("\nFINDINGS:")
+    print("\n" + color("FINDINGS:", BOLD, BLUE))
     for check in (check_reply_to, check_links, check_urgency, check_attachments):
         points, finding = check(msg)
         score += points
-        print(f"  {finding}")
+        print(f"  {color(finding, RED if points else GREEN)}")
 
-    print(f"\nSuspicion score: {score}")
+    print("\n" + color(f"Suspicion score: {score}", BOLD, YELLOW))
     print(f"Verdict: {get_verdict(score)}")
 
 
