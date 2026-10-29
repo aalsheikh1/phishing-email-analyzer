@@ -17,6 +17,14 @@ URGENCY_KEYWORDS = [
     "account locked", "unusual activity", "final notice", "expire",
 ]
 
+# File types that can run code or hide malware: macro Office docs, executables,
+# scripts, disk images, and HTML files used for fake login pages
+DANGEROUS_EXTENSIONS = {
+    ".xlsm", ".docm", ".pptm", ".exe", ".scr", ".bat", ".cmd", ".com",
+    ".js", ".vbs", ".ps1", ".jar", ".msi", ".iso", ".img", ".lnk",
+    ".hta", ".html", ".htm",
+}
+
 
 class LinkExtractor(HTMLParser):
     """Collect (href, visible text) pairs from <a> tags in HTML."""
@@ -125,6 +133,19 @@ def check_urgency(msg):
     return 0, "[ok] No urgency keywords"
 
 
+def check_attachments(msg):
+    """Flag attachments with file types that can carry malware.
+
+    Returns (points, finding) where points is 1 if suspicious, else 0.
+    """
+    dangerous = [name for name in get_attachments(msg)
+                 if any(name.lower().endswith(ext) for ext in DANGEROUS_EXTENSIONS)]
+
+    if dangerous:
+        return 1, f"[!] Dangerous attachment: {', '.join(dangerous)} (+1)"
+    return 0, "[ok] No dangerous attachment types"
+
+
 def print_summary(path, msg):
     """Print the key headers of the email."""
     attachments = get_attachments(msg)
@@ -150,7 +171,7 @@ def main():
     print_summary(path, msg)
 
     print("\nFINDINGS:")
-    for check in (check_reply_to, check_links, check_urgency):
+    for check in (check_reply_to, check_links, check_urgency, check_attachments):
         _, finding = check(msg)
         print(f"  {finding}")
 
