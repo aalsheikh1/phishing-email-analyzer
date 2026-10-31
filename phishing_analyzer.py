@@ -23,6 +23,22 @@ URGENCY_KEYWORDS = [
     "account locked", "unusual activity", "final notice", "expire",
 ]
 
+# Brands phishers often impersonate, mapped to their real domain
+KNOWN_BRANDS = {
+    "paypal": "paypal.com", "microsoft": "microsoft.com", "amazon": "amazon.com",
+    "google": "google.com", "apple": "apple.com", "netflix": "netflix.com",
+    "facebook": "facebook.com", "instagram": "instagram.com", "linkedin": "linkedin.com",
+    "outlook": "outlook.com", "office365": "office365.com", "dropbox": "dropbox.com",
+    "docusign": "docusign.com", "chase": "chase.com", "wellsfargo": "wellsfargo.com",
+    "bankofamerica": "bankofamerica.com", "dhl": "dhl.com", "fedex": "fedex.com",
+}
+
+# Characters swapped in to fool the eye, e.g. "paypa1" or "arnazon"
+LOOKALIKE_SWAPS = [
+    ("rn", "m"), ("vv", "w"), ("0", "o"), ("1", "l"), ("3", "e"),
+    ("4", "a"), ("5", "s"), ("7", "t"),
+]
+
 # File types that can run code or hide malware: macro Office docs, executables,
 # scripts, disk images, and HTML files used for fake login pages
 DANGEROUS_EXTENSIONS = {
@@ -95,23 +111,94 @@ def get_host(url):
     return host.removeprefix("www.")
 
 
+def get_links(msg):
+    """Return (href, visible text) pairs from the HTML body, or None if there is no HTML."""
+    body = msg.get_body(preferencelist=("html",))
+    if body is None:
+        return None
+    extractor = LinkExtractor()
+    extractor.feed(body.get_content())
+    return extractor.links
+
+
 def check_links(msg):
     """Flag links whose visible text shows one address but point to another.
 
     Returns (points, finding) where points is 1 if suspicious, else 0.
     """
-    body = msg.get_body(preferencelist=("html",))
-    if body is None:
+    links = get_links(msg)
+    if links is None:
         return 0, "[ok] No HTML links to inspect"
 
-    extractor = LinkExtractor()
-    extractor.feed(body.get_content())
-
-    for href, text in extractor.links:
+    for href, text in links:
         if URL_LIKE.match(text) and get_host(text) != get_host(href):
             return 1, (f"[!] Link shows '{text}' but goes to '{href}' "
                        f"- the visible link lies (+1)")
     return 0, "[ok] No deceptive display-text links"
+
+
+def edit_distance(a, b):
+    """Return how many single-letter edits turn a into b (Levenshtein distance)."""
+    previous = list(range(len(b) + 1))
+    for i, char_a in enumerate(a, 1):
+        current = [i]
+        for j, char_b in enumerate(b, 1):
+            current.append(min(previous[j] + 1, current[j - 1] + 1,
+                               previous[j - 1] + (char_a != char_b)))
+        previous = current
+    return previous[-1]
+
+
+def get_registered_domain(host):
+    """Return the main domain of a host, e.g. 'mail.paypal.com' -> 'paypal.com'.
+
+    Handles two-part endings like 'co.uk' in a simple way.
+    """
+    labels = host.split(".")
+    if len(labels) >= 3 and labels[-2] in ("co", "com", "org", "net") and len(labels[-1]) == 2:
+        return ".".join(labels[-3:])
+    return ".".join(labels[-2:])
+
+
+def find_imitated_brand(host):
+    """Return the real brand domain a host is imitating, or None."""
+    if host.startswith("xn--") or ".xn--" in host:
+        return "a brand (punycode / foreign-character domain)"
+
+    # The exact brand name under any ending (paypal.com, amazon.co.uk) counts as the real brand
+    registered = get_registered_domain(host)
+    if registered.split(".")[0] in KNOWN_BRANDS:
+        return None
+
+    for label in host.split(".")[:-1]:
+        normalized = label
+        for fake, real in LOOKALIKE_SWAPS:
+            normalized = normalized.replace(fake, real)
+        for brand, real_domain in KNOWN_BRANDS.items():
+            if (normalized == brand
+                    or brand in normalized.split("-")
+                    or (len(brand) >= 6 and edit_distance(normalized, brand) == 1)):
+                return real_domain
+    return None
+
+
+def check_lookalike_domains(msg):
+    """Flag sender, Reply-To, or link domains that imitate a well-known brand.
+
+    Returns (points, finding) where points is 1 if suspicious, else 0.
+    """
+    hosts = [get_domain(msg["From"]), get_domain(msg["Reply-To"])]
+    hosts += [get_host(href) for href, _ in get_links(msg) or []]
+
+    fakes = []
+    for host in dict.fromkeys(h for h in hosts if h):
+        imitated = find_imitated_brand(host)
+        if imitated:
+            fakes.append(f"'{host}' imitates {imitated}")
+
+    if fakes:
+        return 1, f"[!] Lookalike domain: {'; '.join(fakes)} (+1)"
+    return 0, "[ok] No lookalike domains"
 
 
 def get_body_text(msg):
@@ -150,6 +237,32 @@ def check_attachments(msg):
     if dangerous:
         return 1, f"[!] Dangerous attachment: {', '.join(dangerous)} (+1)"
     return 0, "[ok] No dangerous attachment types"
+
+
+def check_authentication(msg):
+    """Flag SPF, DKIM, or DMARC failures recorded by the receiving mail server.
+
+    Returns (points, finding) where points is 1 if suspicious, else 0.
+    """
+    headers = msg.get_all("Authentication-Results")
+    if not headers:
+        return 0, "[?] No Authentication-Results header - not checked (+0)"
+
+    # The first (topmost) result for each method was added by the receiving server
+    results = {}
+    for method, result in re.findall(r"\b(spf|dkim|dmarc)=(\w+)", " ".join(headers), re.IGNORECASE):
+        results.setdefault(method.lower(), result.lower())
+
+    failed = [f"{method}={result}" for method, result in results.items()
+              if result in ("fail", "softfail", "permerror")]
+
+    if failed:
+        return 1, (f"[!] Authentication failed: {', '.join(failed)} "
+                   f"- the sender may be forged (+1)")
+    if results.keys() >= {"spf", "dkim", "dmarc"} and all(r == "pass" for r in results.values()):
+        return 0, "[ok] SPF, DKIM and DMARC passed"
+    summary = ", ".join(f"{m}={r}" for m, r in results.items()) or "no results found"
+    return 0, f"[?] Authentication not conclusive: {summary} (+0)"
 
 
 def color(text, *codes):
@@ -197,10 +310,17 @@ def main():
 
     score = 0
     print("\n" + color("FINDINGS:", BOLD, BLUE))
-    for check in (check_reply_to, check_links, check_urgency, check_attachments):
+    for check in (check_authentication, check_reply_to, check_links,
+                  check_lookalike_domains, check_urgency, check_attachments):
         points, finding = check(msg)
         score += points
-        print(f"  {color(finding, RED if points else GREEN)}")
+        if points:
+            finding_color = RED
+        elif finding.startswith("[?]"):
+            finding_color = YELLOW
+        else:
+            finding_color = GREEN
+        print(f"  {color(finding, finding_color)}")
 
     print("\n" + color(f"Suspicion score: {score}", BOLD, YELLOW))
     print(f"Verdict: {get_verdict(score)}")

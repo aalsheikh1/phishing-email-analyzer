@@ -1,0 +1,22 @@
+Authentication-Results: mx.example.com;
+ spf=pass smtp.mailfrom=paypa1.com;
+ dkim=pass header.d=paypa1.com;
+ dmarc=pass header.from=paypa1.com
+From: PayPal <service@paypa1.com>
+Reply-To: service@paypa1.com
+To: customer@example.com
+Subject: Your payment of $499.00 is on hold
+Date: Fri, 30 Oct 2026 14:22:00 +0000
+Message-ID: <hold-8841@paypa1.com>
+MIME-Version: 1.0
+Content-Type: text/html; charset="utf-8"
+
+<html>
+  <body>
+    <p>Hello,</p>
+    <p>We noticed unusual activity on a recent payment of $499.00.
+    The payment is on hold until you review it.</p>
+    <p><a href="https://paypal.com.account-review.info/login">Review payment</a></p>
+    <p>Thanks,<br>PayPal</p>
+  </body>
+</html>

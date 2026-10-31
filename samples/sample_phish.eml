@@ -1,3 +1,7 @@
+Authentication-Results: mx.yourcompany.com;
+ spf=fail smtp.mailfrom=secure-verify.ru;
+ dkim=fail header.d=secure-verify.ru;
+ dmarc=fail header.from=yourcompany.com
 From: IT Support <support@yourcompany.com>
 Reply-To: support@secure-verify.ru
 To: employee@yourcompany.com

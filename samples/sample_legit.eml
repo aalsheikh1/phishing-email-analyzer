@@ -1,3 +1,7 @@
+Authentication-Results: mx.example.com;
+ spf=pass smtp.mailfrom=bytebrief.com;
+ dkim=pass header.d=bytebrief.com;
+ dmarc=pass header.from=bytebrief.com
 From: Morning Byte Newsletter <newsletter@bytebrief.com>
 Reply-To: newsletter@bytebrief.com
 To: reader@example.com
