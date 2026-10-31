@@ -152,6 +152,32 @@ def check_attachments(msg):
     return 0, "[ok] No dangerous attachment types"
 
 
+def check_authentication(msg):
+    """Flag SPF, DKIM, or DMARC failures recorded by the receiving mail server.
+
+    Returns (points, finding) where points is 1 if suspicious, else 0.
+    """
+    headers = msg.get_all("Authentication-Results")
+    if not headers:
+        return 0, "[?] No Authentication-Results header - not checked (+0)"
+
+    # The first (topmost) result for each method was added by the receiving server
+    results = {}
+    for method, result in re.findall(r"\b(spf|dkim|dmarc)=(\w+)", " ".join(headers), re.IGNORECASE):
+        results.setdefault(method.lower(), result.lower())
+
+    failed = [f"{method}={result}" for method, result in results.items()
+              if result in ("fail", "softfail", "permerror")]
+
+    if failed:
+        return 1, (f"[!] Authentication failed: {', '.join(failed)} "
+                   f"- the sender may be forged (+1)")
+    if results.keys() >= {"spf", "dkim", "dmarc"} and all(r == "pass" for r in results.values()):
+        return 0, "[ok] SPF, DKIM and DMARC passed"
+    summary = ", ".join(f"{m}={r}" for m, r in results.items()) or "no results found"
+    return 0, f"[?] Authentication not conclusive: {summary} (+0)"
+
+
 def color(text, *codes):
     """Wrap text in ANSI color codes when color output is enabled."""
     if not USE_COLOR:
@@ -197,10 +223,17 @@ def main():
 
     score = 0
     print("\n" + color("FINDINGS:", BOLD, BLUE))
-    for check in (check_reply_to, check_links, check_urgency, check_attachments):
+    for check in (check_authentication, check_reply_to, check_links,
+                  check_urgency, check_attachments):
         points, finding = check(msg)
         score += points
-        print(f"  {color(finding, RED if points else GREEN)}")
+        if points:
+            finding_color = RED
+        elif finding.startswith("[?]"):
+            finding_color = YELLOW
+        else:
+            finding_color = GREEN
+        print(f"  {color(finding, finding_color)}")
 
     print("\n" + color(f"Suspicion score: {score}", BOLD, YELLOW))
     print(f"Verdict: {get_verdict(score)}")
